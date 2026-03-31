@@ -84,6 +84,10 @@
   .filter-bar { display:flex; gap:8px; margin-bottom:20px; flex-wrap:wrap; }
   .filter-btn { background:var(--surface); border:1px solid var(--border); color:var(--muted); font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:1px; text-transform:uppercase; padding:6px 14px; cursor:pointer; transition:all 0.2s; }
   .filter-btn:hover, .filter-btn.active { color:var(--text); border-color:var(--accent); background:rgba(225,48,108,0.08); }
+  .pagination { display:flex; gap:8px; margin-top:20px; justify-content:center; align-items:center; }
+  .page-btn { background:var(--surface); border:1px solid var(--border); color:var(--muted); font-family:'JetBrains Mono',monospace; font-size:10px; padding:6px 14px; cursor:pointer; transition:all 0.2s; }
+  .page-btn:hover, .page-btn.active { color:var(--text); border-color:var(--accent); background:rgba(225,48,108,0.08); }
+  .page-info { font-family:'JetBrains Mono',monospace; font-size:10px; color:var(--muted); }
   footer { border-top:1px solid var(--border); padding:24px 0; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; margin-top:64px; }
   footer p { font-family:'JetBrains Mono',monospace; font-size:10px; color:var(--muted); letter-spacing:1px; }
   .ig-gradient { background:linear-gradient(135deg,var(--accent3),var(--accent),var(--accent2)); -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text; }
@@ -104,24 +108,24 @@
       <div id="header-stats">Cargando datos...</div>
     </div>
   </header>
-
+ 
   <div id="loading" class="loading-screen">
     <div class="loading-spinner"></div>
     <div class="loading-text">Cargando datos del Sheet...</div>
   </div>
-
+ 
   <div id="content" style="display:none">
     <div class="summary-bar" id="summary-bar"></div>
     <div class="tabs">
       <button class="tab-btn active" onclick="switchTab('posts',this)">Top Posts</button>
       <button class="tab-btn" onclick="switchTab('cuentas',this)">Cuentas</button>
     </div>
-
+ 
     <div id="tab-posts" class="tab-content active">
       <div class="section-header">
         <h2>Posts Recientes</h2>
         <div class="line"></div>
-        <div class="tag">ordenado por likes</div>
+        <div class="tag" id="posts-tag">ordenado por likes</div>
       </div>
       <div class="filter-bar" id="filter-bar"></div>
       <div style="overflow-x:auto">
@@ -130,8 +134,9 @@
           <tbody id="posts-tbody"></tbody>
         </table>
       </div>
+      <div class="pagination" id="pagination"></div>
     </div>
-
+ 
     <div id="tab-cuentas" class="tab-content">
       <div class="section-header">
         <h2>Resumen por Cuenta</h2>
@@ -141,41 +146,57 @@
       <div class="accounts-grid" id="accounts-grid"></div>
     </div>
   </div>
-
+ 
   <footer>
-    <p>INSTAGRAM MONITOR v2.0 &nbsp;·&nbsp; <span class="ig-gradient">Datos reales · Actualización diaria 7am</span></p>
+    <p>INSTAGRAM MONITOR v2.1 &nbsp;·&nbsp; <span class="ig-gradient">Datos reales · Actualización diaria 7am</span></p>
     <p>© 2026 &nbsp;·&nbsp; Powered by Apify + Google Sheets</p>
   </footer>
 </div>
-
+ 
 <script>
+// ── CUENTAS MONITOREADAS (solo estas se muestran) ─────────────
+const CUENTAS_MONITOREADAS = ['lt7noticias','ferpleyok','radiodos993','radiosudamericana'];
+ 
+// ── URL del Sheet publicado como CSV ─────────────────────────
 const SHEET_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQeiMF1e6Qc9FVTq2XIWABF73STQxUkSoAD_1gjkteX2Z6r4L0HXq1VUbcItb2tZW1lMD4hOeZxk7VL/pub?gid=792720783&single=true&output=csv';
+ 
 let todosLosPosts = [];
-
+let postsFiltrados = [];
+let paginaActual = 1;
+const POSTS_POR_PAGINA = 50;
+ 
 async function cargarDatos() {
   try {
-    const res = await fetch(SHEET_URL);
+    const res = await fetch(SHEET_URL + '&t=' + Date.now()); // cache busting
     const text = await res.text();
     const rows = parseCSV(text);
     if (rows.length < 2) { mostrarError('No hay datos todavía.'); return; }
+ 
     const datos = rows.slice(1).filter(r => r[0] && r[0] !== 'timestamp' && r[0] !== 'FECHA');
+ 
     todosLosPosts = datos.map(r => ({
       fecha: r[0]||'', tipo: r[1]||'', caption: r[2]||'',
       likes: parseInt(r[3])||0, comentarios: parseInt(r[4])||0,
       views: parseInt(r[5])||0, primerComentario: r[6]||'',
-      url: r[7]||'', cuenta: r[8]||'', registrado: r[9]||''
-    })).filter(p => p.cuenta);
+      url: r[7]||'', cuenta: (r[8]||'').toLowerCase().trim(), registrado: r[9]||''
+    }))
+    // ── FILTRO CLAVE: solo las 4 cuentas monitoreadas ──
+    .filter(p => p.cuenta && CUENTAS_MONITOREADAS.includes(p.cuenta));
+ 
     todosLosPosts.sort((a,b) => b.likes - a.likes);
+    postsFiltrados = [...todosLosPosts];
+ 
     renderTodo();
     document.getElementById('loading').style.display = 'none';
     document.getElementById('content').style.display = 'block';
+ 
     const ahora = new Date();
     document.getElementById('update-time').textContent = 'Datos al: ' + ahora.toLocaleDateString('es-AR') + ' ' + ahora.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'});
   } catch(e) {
-    mostrarError('Error: ' + e.message);
+    mostrarError('Error cargando datos: ' + e.message);
   }
 }
-
+ 
 function parseCSV(text) {
   const rows = [];
   for (const line of text.split('\n')) {
@@ -190,23 +211,22 @@ function parseCSV(text) {
   }
   return rows;
 }
-
+ 
 function renderTodo() {
-  const cuentas = [...new Set(todosLosPosts.map(p=>p.cuenta))];
-  renderSummary(cuentas);
-  renderFiltros(cuentas);
-  renderPosts(todosLosPosts);
-  renderCuentas(cuentas);
-  document.getElementById('header-stats').textContent = 'Cuentas: ' + cuentas.length + '  ·  Posts: ' + todosLosPosts.length;
+  renderSummary();
+  renderFiltros();
+  renderPosts();
+  renderCuentas();
+  document.getElementById('header-stats').textContent = 'Cuentas: ' + CUENTAS_MONITOREADAS.length + '  ·  Posts: ' + todosLosPosts.length;
 }
-
-function renderSummary(cuentas) {
+ 
+function renderSummary() {
   const tL = todosLosPosts.reduce((s,p)=>s+p.likes,0);
   const tC = todosLosPosts.reduce((s,p)=>s+p.comentarios,0);
   const tV = todosLosPosts.reduce((s,p)=>s+p.views,0);
   const top = todosLosPosts[0];
   document.getElementById('summary-bar').innerHTML = `
-    <div class="summary-item"><div class="label">Cuentas</div><div class="value" style="color:var(--accent)">${cuentas.length}</div><div class="change">monitoreadas</div></div>
+    <div class="summary-item"><div class="label">Cuentas</div><div class="value" style="color:var(--accent)">${CUENTAS_MONITOREADAS.length}</div><div class="change">monitoreadas</div></div>
     <div class="summary-item"><div class="label">Posts</div><div class="value">${todosLosPosts.length}</div><div class="change">analizados</div></div>
     <div class="summary-item"><div class="label">Likes totales</div><div class="value" style="color:var(--accent2)">${fmt(tL)}</div><div class="change">acumulados</div></div>
     <div class="summary-item"><div class="label">Comentarios</div><div class="value">${fmt(tC)}</div><div class="change">acumulados</div></div>
@@ -214,28 +234,46 @@ function renderSummary(cuentas) {
     <div class="summary-item"><div class="label">Post más viral</div><div class="value" style="font-size:16px;padding-top:4px;color:var(--gold)">@${top?top.cuenta:'—'}</div><div class="change">${top?fmt(top.likes)+' likes':''}</div></div>
   `;
 }
-
-function renderFiltros(cuentas) {
+ 
+function renderFiltros() {
   const bar = document.getElementById('filter-bar');
   bar.innerHTML = `<button class="filter-btn active" onclick="filtrar('todas',this)">Todas</button>`;
-  cuentas.forEach(c => bar.innerHTML += `<button class="filter-btn" onclick="filtrar('${c}',this)">@${c}</button>`);
+  CUENTAS_MONITOREADAS.forEach(c => {
+    bar.innerHTML += `<button class="filter-btn" onclick="filtrar('${c}',this)">@${c}</button>`;
+  });
 }
-
+ 
 function filtrar(cuenta, btn) {
   document.querySelectorAll('.filter-btn').forEach(b=>b.classList.remove('active'));
   btn.classList.add('active');
-  renderPosts(cuenta==='todas' ? todosLosPosts : todosLosPosts.filter(p=>p.cuenta===cuenta));
+  postsFiltrados = cuenta==='todas' ? [...todosLosPosts] : todosLosPosts.filter(p=>p.cuenta===cuenta);
+  paginaActual = 1;
+  renderPosts();
 }
-
-function renderPosts(posts) {
-  const top = posts.slice(0,50);
+ 
+function renderPosts() {
+  const inicio = (paginaActual - 1) * POSTS_POR_PAGINA;
+  const fin = inicio + POSTS_POR_PAGINA;
+  const pagina = postsFiltrados.slice(inicio, fin);
+  const totalPaginas = Math.ceil(postsFiltrados.length / POSTS_POR_PAGINA);
+ 
+  document.getElementById('posts-tag').textContent = postsFiltrados.length + ' posts · ordenado por likes';
+ 
   const tbody = document.getElementById('posts-tbody');
-  if (!top.length) { tbody.innerHTML=`<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:40px">Sin posts</td></tr>`; return; }
+  if (!pagina.length) {
+    tbody.innerHTML=`<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:40px">Sin posts</td></tr>`;
+    document.getElementById('pagination').innerHTML = '';
+    return;
+  }
+ 
   const emojis = {Video:'🎬', Image:'📷', Sidecar:'🖼️'};
   const rankColors = ['var(--gold)','#aaa','#cd7f32'];
-  tbody.innerHTML = top.map((p,i) => `
+ 
+  tbody.innerHTML = pagina.map((p,i) => {
+    const numGlobal = inicio + i + 1;
+    return `
     <tr>
-      <td class="stat-cell" style="color:${rankColors[i]||'var(--muted)'}">${String(i+1).padStart(2,'0')}</td>
+      <td class="stat-cell" style="color:${rankColors[i]||'var(--muted)'}">${String(numGlobal).padStart(2,'0')}</td>
       <td><div class="post-meta">
         <div class="post-thumb">${emojis[p.tipo]||'📷'}</div>
         <div class="post-info">
@@ -248,19 +286,38 @@ function renderPosts(posts) {
       <td class="stat-cell">${fmt(p.comentarios)}</td>
       <td class="stat-cell">${fmt(p.views)}</td>
       <td class="stat-cell" style="color:var(--muted)">${p.fecha.substring(0,10)}</td>
-    </tr>
-  `).join('');
+    </tr>`;
+  }).join('');
+ 
+  // Paginación
+  const pag = document.getElementById('pagination');
+  if (totalPaginas <= 1) { pag.innerHTML = ''; return; }
+ 
+  let html = '';
+  if (paginaActual > 1) html += `<button class="page-btn" onclick="irPagina(${paginaActual-1})">← Ant</button>`;
+  html += `<span class="page-info">Página ${paginaActual} de ${totalPaginas}</span>`;
+  if (paginaActual < totalPaginas) html += `<button class="page-btn" onclick="irPagina(${paginaActual+1})">Sig →</button>`;
+  pag.innerHTML = html;
 }
-
-function renderCuentas(cuentas) {
-  const stats = cuentas.map(c => {
+ 
+function irPagina(n) {
+  paginaActual = n;
+  renderPosts();
+  window.scrollTo({top:0, behavior:'smooth'});
+}
+ 
+function renderCuentas() {
+  const stats = CUENTAS_MONITOREADAS.map(c => {
     const ps = todosLosPosts.filter(p=>p.cuenta===c);
     const tL = ps.reduce((s,p)=>s+p.likes,0);
     const tC = ps.reduce((s,p)=>s+p.comentarios,0);
-    return {c, n:ps.length, tL, tC, aL:ps.length?Math.round(tL/ps.length):0, aC:ps.length?Math.round(tC/ps.length):0};
+    const tV = ps.reduce((s,p)=>s+p.views,0);
+    return {c, n:ps.length, tL, tC, tV, aL:ps.length?Math.round(tL/ps.length):0, aC:ps.length?Math.round(tC/ps.length):0};
   }).sort((a,b)=>b.tL-a.tL);
+ 
   const maxL = Math.max(...stats.map(s=>s.aL));
-  const classes = ['rank-1','rank-2','rank-3'];
+  const classes = ['rank-1','rank-2','rank-3','rank-other'];
+ 
   document.getElementById('accounts-grid').innerHTML = stats.map((s,i) => `
     <div class="account-card ${classes[i]||'rank-other'}">
       <div class="card-rank">${i+1}</div>
@@ -271,32 +328,32 @@ function renderCuentas(cuentas) {
       <div class="metrics-row">
         <div class="metric"><div class="m-label">Total Likes</div><div class="m-value" style="color:var(--accent)">${fmt(s.tL)}</div></div>
         <div class="metric"><div class="m-label">Prom. Likes</div><div class="m-value">${fmt(s.aL)}</div></div>
-        <div class="metric"><div class="m-label">Prom. Coment</div><div class="m-value">${fmt(s.aC)}</div></div>
+        <div class="metric"><div class="m-label">Total Views</div><div class="m-value" style="color:var(--green)">${fmt(s.tV)}</div></div>
       </div>
       <div class="eng-row"><div class="eng-label">Likes prom</div><div class="eng-bar-bg"><div class="eng-bar-fill" style="width:${maxL?Math.round(s.aL/maxL*100):0}%;background:var(--accent)"></div></div><div class="eng-value">${fmt(s.aL)}</div></div>
       <div class="eng-row"><div class="eng-label">Coment prom</div><div class="eng-bar-bg"><div class="eng-bar-fill" style="width:${maxL?Math.round(s.aC/maxL*100):0}%;background:var(--accent2)"></div></div><div class="eng-value">${fmt(s.aC)}</div></div>
     </div>
   `).join('');
 }
-
+ 
 function fmt(n) {
   if(!n)return'0';
   if(n>=1000000)return(n/1000000).toFixed(1)+'M';
   if(n>=1000)return(n/1000).toFixed(1)+'K';
   return n.toString();
 }
-
+ 
 function mostrarError(msg) {
   document.getElementById('loading').innerHTML = `<div style="text-align:center;color:var(--muted);font-family:'JetBrains Mono',monospace;font-size:12px"><div style="font-size:32px;margin-bottom:16px">⚠️</div>${msg}</div>`;
 }
-
+ 
 function switchTab(id, btn) {
   document.querySelectorAll('.tab-content').forEach(t=>t.classList.remove('active'));
   document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
   document.getElementById('tab-'+id).classList.add('active');
   btn.classList.add('active');
 }
-
+ 
 cargarDatos();
 </script>
 </body>
